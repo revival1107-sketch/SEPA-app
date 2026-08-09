@@ -214,6 +214,7 @@ main {
   cursor: pointer;
 }
 .period-btn:hover { border-color: var(--accent); color: var(--text); }
+.period-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
 
 .checklist { list-style: none; margin: 0; padding: 0; }
 .checklist li {

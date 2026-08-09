@@ -1,5 +1,31 @@
 const API_BASE = "";
 let priceChartInstance = null;
+let dataDisplayEnabled = false;
+
+const crosshairPlugin = {
+  id: "crosshair",
+  afterDraw(chart) {
+    if (!dataDisplayEnabled) return;
+    const active = chart.getActiveElements();
+    if (!active || !active.length) return;
+    const { ctx, chartArea } = chart;
+    const { x, y } = active[0].element;
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = "rgba(154,164,184,0.7)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(chartArea.left, y);
+    ctx.lineTo(chartArea.right, y);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+Chart.register(crosshairPlugin);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
@@ -233,6 +259,7 @@ function buildChartConfig(chart) {
           limits: { x: { min: "original", max: "original" } },
         },
         tooltip: {
+          enabled: dataDisplayEnabled,
           filter: (item) => item.dataset.type !== "bar",
           callbacks: {
             label: (context) => {
@@ -272,6 +299,7 @@ function openChartPopup() {
   if (!lastChartData) return;
   document.getElementById("chartModal").classList.remove("hidden");
   document.getElementById("chartModalTitle").textContent = document.getElementById("chartTitle").textContent;
+  document.getElementById("popupDataDisplayBtn").classList.toggle("active", dataDisplayEnabled);
   document.body.style.overflow = "hidden";
   const ctx = document.getElementById("popupChart").getContext("2d");
   if (popupChartInstance) popupChartInstance.destroy();
@@ -299,6 +327,20 @@ document.getElementById("chartModal").addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !document.getElementById("chartModal").classList.contains("hidden")) closeChartPopup();
 });
+
+function toggleDataDisplay() {
+  dataDisplayEnabled = !dataDisplayEnabled;
+  document.getElementById("dataDisplayBtn").classList.toggle("active", dataDisplayEnabled);
+  document.getElementById("popupDataDisplayBtn").classList.toggle("active", dataDisplayEnabled);
+  [priceChartInstance, popupChartInstance].forEach(instance => {
+    if (!instance) return;
+    instance.options.plugins.tooltip.enabled = dataDisplayEnabled;
+    instance.update();
+  });
+}
+
+document.getElementById("dataDisplayBtn").addEventListener("click", toggleDataDisplay);
+document.getElementById("popupDataDisplayBtn").addEventListener("click", toggleDataDisplay);
 
 function renderVcp(vcp) {
   const box = document.getElementById("vcpBox");
