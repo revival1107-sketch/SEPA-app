@@ -5,14 +5,13 @@ let dataDisplayEnabled = false;
 const crosshairPlugin = {
   id: "crosshair",
   afterDraw(chart) {
-    if (!dataDisplayEnabled) return;
     const active = chart.getActiveElements();
     if (!active || !active.length) return;
     const { ctx, chartArea } = chart;
     const { x, y } = active[0].element;
     ctx.save();
     ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = "rgba(154,164,184,0.7)";
+    ctx.strokeStyle = "rgba(226,230,238,0.9)";
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(x, chartArea.top);
@@ -250,13 +249,16 @@ function buildChartConfig(chart) {
       plugins: {
         legend: { labels: { color: "#e6e8ef", filter: (item) => item.text !== "거래량", font: { size: mobile ? 11 : 12 }, boxWidth: mobile ? 12 : 24 } },
         zoom: {
-          pan: { enabled: true, mode: "x" },
+          pan: { enabled: true, mode: "xy" },
           zoom: {
             wheel: { enabled: true },
             pinch: { enabled: true },
-            mode: "x",
+            mode: "xy",
           },
-          limits: { x: { min: "original", max: "original" } },
+          limits: {
+            x: { min: "original", max: "original" },
+            y: { min: "original", max: "original" },
+          },
         },
         tooltip: {
           enabled: dataDisplayEnabled,
