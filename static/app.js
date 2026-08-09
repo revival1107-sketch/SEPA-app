@@ -145,10 +145,15 @@ function renderChecklist(checks) {
   });
 }
 
-function renderChart(chart) {
-  const ctx = document.getElementById("priceChart").getContext("2d");
-  if (priceChartInstance) priceChartInstance.destroy();
+let lastChartData = null;
+let popupChartInstance = null;
 
+function isMobileViewport() {
+  return window.innerWidth <= 768;
+}
+
+function buildChartConfig(chart) {
+  const mobile = isMobileViewport();
   const n = chart.dates.length;
   const points = chart.dates.map(d => new Date(d + "T00:00:00").getTime());
   const volumeByX = {};
@@ -168,7 +173,7 @@ function renderChart(chart) {
   };
   const volumeData = chart.dates.map((d, i) => ({ x: points[i], y: chart.volume[i] }));
 
-  priceChartInstance = new Chart(ctx, {
+  return {
     type: "candlestick",
     data: {
       datasets: [
@@ -176,11 +181,12 @@ function renderChart(chart) {
           type: "candlestick", label: "가격", data: candleData,
           color: { up: "#2fbf71", down: "#ef4a5f", unchanged: "#9aa0b0" },
           parsing: false,
+          barPercentage: mobile ? 0.85 : 0.7,
           order: 1,
         },
-        { type: "line", label: "50일선", data: lineData(chart.sma50), borderColor: "#4f8cff", borderWidth: 1.2, pointRadius: 0, order: 2 },
-        { type: "line", label: "150일선", data: lineData(chart.sma150), borderColor: "#e0a52c", borderWidth: 1.2, pointRadius: 0, order: 2 },
-        { type: "line", label: "200일선", data: lineData(chart.sma200), borderColor: "#ef9a4a", borderWidth: 1.2, pointRadius: 0, order: 2 },
+        { type: "line", label: "50일선", data: lineData(chart.sma50), borderColor: "#4f8cff", borderWidth: mobile ? 1.6 : 1.2, pointRadius: 0, order: 2 },
+        { type: "line", label: "150일선", data: lineData(chart.sma150), borderColor: "#e0a52c", borderWidth: mobile ? 1.6 : 1.2, pointRadius: 0, order: 2 },
+        { type: "line", label: "200일선", data: lineData(chart.sma200), borderColor: "#ef9a4a", borderWidth: mobile ? 1.6 : 1.2, pointRadius: 0, order: 2 },
         {
           type: "bar", label: "거래량", data: volumeData, yAxisID: "volume",
           backgroundColor: "rgba(79,140,255,0.35)", order: 3,
@@ -189,6 +195,7 @@ function renderChart(chart) {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       animation: false,
       events: ["mousemove", "mouseout", "click", "touchstart", "touchmove", "mousedown", "mouseup"],
       interaction: { mode: "index", intersect: false },
@@ -196,12 +203,12 @@ function renderChart(chart) {
         x: {
           type: "timeseries",
           time: { unit: "month" },
-          ticks: { color: "#9aa0b0", maxTicksLimit: 8, autoSkip: true, maxRotation: 0 },
+          ticks: { color: "#9aa0b0", maxTicksLimit: mobile ? 5 : 8, autoSkip: true, maxRotation: 0, font: { size: mobile ? 11 : 12 } },
           grid: { color: "#2a2e3a" },
         },
         y: {
           position: "right",
-          ticks: { color: "#9aa0b0" },
+          ticks: { color: "#9aa0b0", font: { size: mobile ? 11 : 12 } },
           grid: { color: "#2a2e3a" },
         },
         volume: {
@@ -215,7 +222,7 @@ function renderChart(chart) {
         },
       },
       plugins: {
-        legend: { labels: { color: "#e6e8ef", filter: (item) => item.text !== "거래량" } },
+        legend: { labels: { color: "#e6e8ef", filter: (item) => item.text !== "거래량", font: { size: mobile ? 11 : 12 }, boxWidth: mobile ? 12 : 24 } },
         zoom: {
           pan: { enabled: true, mode: "x" },
           zoom: {
@@ -250,8 +257,48 @@ function renderChart(chart) {
         },
       },
     },
-  });
+  };
 }
+
+function renderChart(chart) {
+  lastChartData = chart;
+  const ctx = document.getElementById("priceChart").getContext("2d");
+  if (priceChartInstance) priceChartInstance.destroy();
+  priceChartInstance = new Chart(ctx, buildChartConfig(chart));
+  requestAnimationFrame(() => { if (priceChartInstance) priceChartInstance.resize(); });
+}
+
+function openChartPopup() {
+  if (!lastChartData) return;
+  document.getElementById("chartModal").classList.remove("hidden");
+  document.getElementById("chartModalTitle").textContent = document.getElementById("chartTitle").textContent;
+  document.body.style.overflow = "hidden";
+  const ctx = document.getElementById("popupChart").getContext("2d");
+  if (popupChartInstance) popupChartInstance.destroy();
+  popupChartInstance = new Chart(ctx, buildChartConfig(lastChartData));
+  requestAnimationFrame(() => { if (popupChartInstance) popupChartInstance.resize(); });
+}
+
+function closeChartPopup() {
+  document.getElementById("chartModal").classList.add("hidden");
+  document.body.style.overflow = "";
+  if (popupChartInstance) {
+    popupChartInstance.destroy();
+    popupChartInstance = null;
+  }
+}
+
+document.getElementById("popupChartBtn").addEventListener("click", openChartPopup);
+document.getElementById("popupCloseBtn").addEventListener("click", closeChartPopup);
+document.getElementById("popupResetZoomBtn").addEventListener("click", () => {
+  if (popupChartInstance) popupChartInstance.resetZoom();
+});
+document.getElementById("chartModal").addEventListener("click", (e) => {
+  if (e.target.id === "chartModal") closeChartPopup();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("chartModal").classList.contains("hidden")) closeChartPopup();
+});
 
 function renderVcp(vcp) {
   const box = document.getElementById("vcpBox");
