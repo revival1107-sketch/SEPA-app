@@ -14,6 +14,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
     document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    if (btn.dataset.tab === "watchlist") loadWatchlist();
   });
 });
 
@@ -121,6 +122,8 @@ function renderResult(data) {
   renderChart(data.chart);
   renderVcp(data.vcp);
   renderRs(data);
+  currentAnalyzed = { ticker: data.ticker, name: data.name, market: data.market };
+  updateWatchlistToggleUI();
 }
 
 document.getElementById("resetZoomBtn").addEventListener("click", () => {
@@ -371,3 +374,165 @@ function renderScreenResult(data) {
     });
   });
 }
+
+// ---- 관심종목(Watchlist) ----
+let watchlistItems = {}; // ticker -> item
+let watchlistConfigured = true;
+let currentAnalyzed = null; // {ticker, name, market}
+let noteSaveTimer = null;
+
+async function loadWatchlist() {
+  const statusEl = document.getElementById("watchlistStatus");
+  statusEl.textContent = "불러오는 중...";
+  try {
+    const res = await fetch(`${API_BASE}/api/watchlist`);
+    const data = await res.json();
+    watchlistConfigured = data.configured !== false;
+    watchlistItems = {};
+    (data.items || []).forEach(it => { watchlistItems[it.ticker] = it; });
+    statusEl.textContent = watchlistConfigured ? "" : "Supabase 미설정";
+    renderWatchlistList();
+    updateWatchlistToggleUI();
+  } catch (err) {
+    statusEl.textContent = "불러오기 오류: " + err.message;
+  }
+}
+
+function renderWatchlistList() {
+  const box = document.getElementById("watchlistResult");
+  if (!watchlistConfigured) {
+    box.innerHTML = `<p class="empty-state">Supabase가 아직 설정되지 않았습니다. SUPABASE_URL / SUPABASE_SERVICE_KEY 환경변수를 설정하면 관심종목·메모 기능이 활성화됩니다.</p>`;
+    return;
+  }
+  const items = Object.values(watchlistItems);
+  if (!items.length) {
+    box.innerHTML = `<p class="empty-state">관심종목이 없습니다. 종목 분석 화면에서 "☆ 관심종목 추가"를 눌러보세요.</p>`;
+    return;
+  }
+  box.innerHTML = "";
+  items.forEach(item => {
+    const card = document.createElement("div");
+    card.className = "watchlist-card";
+    const marketLabel = item.market === "KR" ? "코스피/코스닥" : "미국/해외";
+    card.innerHTML = `
+      <div class="watchlist-card-header">
+        <div>
+          <div class="watchlist-card-title">${item.ticker} (${item.name || item.ticker})</div>
+          <div class="watchlist-card-sub">${marketLabel}</div>
+        </div>
+        <button class="watchlist-remove-btn">삭제</button>
+      </div>
+      <textarea class="note-textarea" style="margin-top:10px;" placeholder="메모 입력...">${item.note || ""}</textarea>
+    `;
+    card.querySelector(".watchlist-card-title").addEventListener("click", () => {
+      tickerInput.value = item.ticker;
+      runAnalyze(item.ticker);
+    });
+    card.querySelector(".watchlist-remove-btn").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await removeFromWatchlist(item.ticker);
+    });
+    const textarea = card.querySelector("textarea");
+    textarea.addEventListener("input", () => {
+      clearTimeout(noteSaveTimer);
+      noteSaveTimer = setTimeout(() => saveNote(item.ticker, textarea.value), 800);
+    });
+    box.appendChild(card);
+  });
+}
+
+function updateWatchlistToggleUI() {
+  const btn = document.getElementById("watchlistToggleBtn");
+  const noteBox = document.getElementById("watchlistNoteBox");
+  const noteInput = document.getElementById("watchlistNoteInput");
+  if (!currentAnalyzed) {
+    btn.classList.add("hidden");
+    noteBox.classList.add("hidden");
+    return;
+  }
+  btn.classList.remove("hidden");
+  if (!watchlistConfigured) {
+    btn.textContent = "Supabase 미설정";
+    btn.disabled = true;
+    noteBox.classList.add("hidden");
+    return;
+  }
+  btn.disabled = false;
+  const inList = !!watchlistItems[currentAnalyzed.ticker];
+  btn.textContent = inList ? "★ 관심종목 제거" : "☆ 관심종목 추가";
+  btn.classList.toggle("active", inList);
+  if (inList) {
+    noteBox.classList.remove("hidden");
+    noteInput.value = watchlistItems[currentAnalyzed.ticker].note || "";
+  } else {
+    noteBox.classList.add("hidden");
+  }
+}
+
+async function toggleWatchlist() {
+  if (!currentAnalyzed || !watchlistConfigured) return;
+  const btn = document.getElementById("watchlistToggleBtn");
+  btn.disabled = true;
+  try {
+    const inList = !!watchlistItems[currentAnalyzed.ticker];
+    if (inList) {
+      await removeFromWatchlist(currentAnalyzed.ticker);
+    } else {
+      const res = await fetch(`${API_BASE}/api/watchlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: currentAnalyzed.ticker }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "추가 실패");
+      watchlistItems[data.item.ticker] = data.item;
+      updateWatchlistToggleUI();
+    }
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function removeFromWatchlist(ticker) {
+  try {
+    const res = await fetch(`${API_BASE}/api/watchlist/${encodeURIComponent(ticker)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || "삭제 실패");
+    }
+    delete watchlistItems[ticker];
+    updateWatchlistToggleUI();
+    renderWatchlistList();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function saveNote(ticker, note) {
+  const statusEl = document.getElementById("watchlistNoteStatus");
+  try {
+    const res = await fetch(`${API_BASE}/api/watchlist/${encodeURIComponent(ticker)}/note`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "저장 실패");
+    if (watchlistItems[ticker]) watchlistItems[ticker].note = note;
+    if (statusEl) { statusEl.textContent = "저장됨"; setTimeout(() => { statusEl.textContent = ""; }, 1500); }
+  } catch (err) {
+    if (statusEl) statusEl.textContent = "저장 오류: " + err.message;
+  }
+}
+
+document.getElementById("watchlistToggleBtn").addEventListener("click", toggleWatchlist);
+document.getElementById("watchlistRefreshBtn").addEventListener("click", loadWatchlist);
+document.getElementById("watchlistNoteInput").addEventListener("input", () => {
+  if (!currentAnalyzed) return;
+  clearTimeout(noteSaveTimer);
+  noteSaveTimer = setTimeout(() => saveNote(currentAnalyzed.ticker, document.getElementById("watchlistNoteInput").value), 800);
+});
+
+loadWatchlist();

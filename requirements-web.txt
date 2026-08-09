@@ -32,3 +32,4 @@ websockets==17.0.1
 Werkzeug==3.1.8
 yfinance==1.5.2
 gunicorn==23.0.0
+python-dotenv==1.2.2

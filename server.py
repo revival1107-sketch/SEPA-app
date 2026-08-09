@@ -2,9 +2,15 @@
 import os
 import sys
 
+from dotenv import load_dotenv
+
+# exe로 패키징된 경우 exe 옆의 .env를, 개발 모드에서는 프로젝트 루트의 .env를 읽는다.
+_ENV_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_ENV_DIR, ".env"))
+
 from flask import Flask, jsonify, request, send_from_directory
 
-from app import data, screener
+from app import data, screener, watchlist_store
 from app.analysis import add_moving_averages, trend_template_checks, weighted_rs_score, percentile_rank, vcp_analysis
 
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -101,6 +107,61 @@ def screen():
         return jsonify({"error": str(e)}), 500
 
     return jsonify({market: candidates})
+
+
+@app.get("/api/watchlist")
+def get_watchlist():
+    if not watchlist_store.is_configured():
+        return jsonify({"configured": False, "items": []})
+    try:
+        items = watchlist_store.list_watchlist()
+        return jsonify({"configured": True, "items": items})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"configured": True, "error": f"Supabase 조회 오류: {e}"}), 500
+
+
+@app.post("/api/watchlist")
+def post_watchlist():
+    if not watchlist_store.is_configured():
+        return jsonify({"error": "Supabase가 설정되지 않았습니다."}), 400
+    body = request.get_json(silent=True) or {}
+    raw_ticker = (body.get("ticker") or "").strip()
+    if not raw_ticker:
+        return jsonify({"error": "ticker가 필요합니다."}), 400
+    try:
+        ticker, market, _df = data.fetch_history(raw_ticker)
+        fundamentals = data.fetch_fundamentals(ticker)
+        name = fundamentals.get("short_name") or ticker
+        item = watchlist_store.add_watchlist(ticker, name, market)
+        return jsonify({"item": item})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"Supabase 저장 오류: {e}"}), 500
+
+
+@app.delete("/api/watchlist/<string:ticker>")
+def delete_watchlist(ticker):
+    if not watchlist_store.is_configured():
+        return jsonify({"error": "Supabase가 설정되지 않았습니다."}), 400
+    try:
+        watchlist_store.remove_watchlist(ticker)
+        return jsonify({"ok": True})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"Supabase 삭제 오류: {e}"}), 500
+
+
+@app.put("/api/watchlist/<string:ticker>/note")
+def put_watchlist_note(ticker):
+    if not watchlist_store.is_configured():
+        return jsonify({"error": "Supabase가 설정되지 않았습니다."}), 400
+    body = request.get_json(silent=True) or {}
+    note = body.get("note", "")
+    try:
+        item = watchlist_store.update_note(ticker, note)
+        return jsonify({"item": item})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"Supabase 저장 오류: {e}"}), 500
 
 
 if __name__ == "__main__":

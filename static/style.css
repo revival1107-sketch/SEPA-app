@@ -129,6 +129,59 @@ main {
 .verdict.pass { background: rgba(47,191,113,0.15); color: var(--green); }
 .verdict.fail { background: rgba(239,74,95,0.15); color: var(--red); }
 
+.watchlist-toggle-btn {
+  display: block;
+  margin-top: 8px;
+  margin-left: auto;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.watchlist-toggle-btn.active { background: rgba(224,165,44,0.15); color: var(--amber); border-color: var(--amber); }
+
+.note-textarea {
+  width: 100%;
+  min-height: 70px;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #0c0e14;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.watchlist-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.watchlist-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+.watchlist-card-title { font-weight: 700; }
+.watchlist-card-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.watchlist-remove-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: 1.3fr 1fr;
