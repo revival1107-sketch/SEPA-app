@@ -1,0 +1,15 @@
+{
+  "name": "SEPA 종목 발굴기",
+  "short_name": "SEPA 발굴기",
+  "description": "Mark Minervini 트렌드 템플릿 · VCP 기반 종목 분석/발굴 앱",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f1117",
+  "theme_color": "#0f1117",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
