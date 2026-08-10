@@ -310,7 +310,7 @@ function setInterval_(interval) {
     if (popupChartInstance) {
       const ctx = document.getElementById("popupChart").getContext("2d");
       popupChartInstance.destroy();
-      popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval)));
+      popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval), { isPopup: true }));
       requestAnimationFrame(() => { if (popupChartInstance) popupChartInstance.resize(); });
     }
   }
@@ -481,7 +481,8 @@ function isMobileViewport() {
   return window.innerWidth <= 768;
 }
 
-function buildChartConfig(chart) {
+function buildChartConfig(chart, opts) {
+  const isPopup = !!(opts && opts.isPopup);
   const mobile = isMobileViewport();
   const n = chart.dates.length;
   const points = chart.dates.map(d => new Date(d + "T00:00:00").getTime());
@@ -502,16 +503,17 @@ function buildChartConfig(chart) {
   };
   const volumeData = chart.dates.map((d, i) => ({ x: points[i], y: chart.volume[i] }));
 
-  // 차트 오른쪽 끝(가격 축)에 캔들 3개 정도의 여백을 준다.
+  // 차트 오른쪽 끝(가격 축)에 캔들 5개 정도의 여백을 준다.
   // "timeseries" 스케일은 실제 날짜 간격이 아니라 점의 순번 기준으로 픽셀을 균등 배분하므로,
   // 축의 max 값만 늘리면(실데이터 밖 구간은 보간되어) 원하는 만큼의 픽셀 여백이 생기지 않는다.
-  // 대신 값이 없는(y: null) "가짜" 데이터 포인트 3개를 추가해 같은 간격으로 픽셀을 차지하게 한다.
+  // 대신 값이 없는(y: null) "가짜" 데이터 포인트 5개를 추가해 같은 간격으로 픽셀을 차지하게 한다.
+  const PAD_CANDLES = 5;
   const futurePoints = [];
   if (points.length >= 2) {
     const sampleCount = Math.min(5, points.length - 1);
     const spacing = (points[points.length - 1] - points[points.length - 1 - sampleCount]) / sampleCount;
     const last = points[points.length - 1];
-    for (let k = 1; k <= 3; k++) futurePoints.push(last + spacing * k);
+    for (let k = 1; k <= PAD_CANDLES; k++) futurePoints.push(last + spacing * k);
   }
   const padData = futurePoints.map(x => ({ x, y: null }));
 
@@ -545,6 +547,9 @@ function buildChartConfig(chart) {
       events: ["mousemove", "mouseout", "click", "touchstart", "touchmove", "mousedown", "mouseup"],
       interaction: { mode: "index", intersect: false },
       hover: { mode: "index", intersect: false },
+      // 팝업은 세로로 매우 길어져 날짜 축이 화면 아래쪽 끝까지 내려가므로,
+      // 아래쪽에 여백을 둬 날짜 축을 위로 올리고 축 드래그 확대 영역도 넉넉하게 잡는다.
+      layout: { padding: { bottom: isPopup ? 60 : 0 } },
       scales: {
         x: {
           type: "timeseries",
@@ -626,7 +631,7 @@ function openChartPopup() {
   document.body.style.overflow = "hidden";
   const ctx = document.getElementById("popupChart").getContext("2d");
   if (popupChartInstance) popupChartInstance.destroy();
-  popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval)));
+  popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval), { isPopup: true }));
   requestAnimationFrame(() => { if (popupChartInstance) popupChartInstance.resize(); });
 }
 
@@ -709,7 +714,7 @@ async function pollQuote() {
       const savedY = { min: popupChartInstance.scales.y.min, max: popupChartInstance.scales.y.max };
       const ctx = document.getElementById("popupChart").getContext("2d");
       popupChartInstance.destroy();
-      popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval)));
+      popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval), { isPopup: true }));
       popupChartInstance.zoomScale("x", savedX, "none");
       popupChartInstance.zoomScale("y", savedY, "none");
     }

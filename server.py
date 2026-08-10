@@ -53,7 +53,7 @@ def analyze():
     vcp = vcp_analysis(df)
     fundamentals = data.fetch_fundamentals(ticker)
 
-    tail = df.tail(280).reset_index()
+    tail = df.tail(2600).reset_index()  # 10년치 일봉(약 2,520거래일) + 여유분
     date_col = tail.columns[0]
     chart = {
         "dates": [d.strftime("%Y-%m-%d") for d in tail[date_col]],

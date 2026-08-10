@@ -60,7 +60,7 @@ def _download_history(ticker: str, period: str = "2y"):
     return df
 
 
-def fetch_history(raw_ticker: str, period: str = "2y"):
+def fetch_history(raw_ticker: str, period: str = "10y"):
     """단일 종목 히스토리 조회. 반환: (ticker_used, market, df)"""
     ticker, market = normalize_ticker(raw_ticker)
 
