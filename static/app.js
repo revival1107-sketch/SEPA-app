@@ -184,8 +184,35 @@ const hoverTrackerPlugin = {
       chart.__hoverY = null;
     }
   },
+  // Chart.js는 "가장 가까운 인덱스"가 바뀌지 않으면 다시 그리지 않는다. 그래서 마지막
+  // 캔들 다음 빈 여백으로 이동해도(가장 가까운 인덱스는 여전히 마지막 캔들이라) 재렌더가
+  // 아예 발생하지 않아 beforeTooltipDraw 게이트가 다시 호출될 기회조차 없다. 매
+  // mousemove/mouseout마다 강제로 "바뀜" 표시를 해서 매번 다시 그리게 만든다.
+  afterEvent(chart, args) {
+    const t = args.event.type;
+    if (t === "mousemove" || t === "mouseover" || t === "mouseout") args.changed = true;
+  },
 };
 Chart.register(hoverTrackerPlugin);
+
+const tooltipGatePlugin = {
+  id: "tooltipGate",
+  // Chart.js는 "활성 인덱스"가 바뀔 때만 툴팁 내용을 다시 계산해서, tooltip.filter나
+  // afterEvent에서 active elements를 손봐도 소용없다(핵심 내부 이벤트 처리가 그 이후에
+  // 다시 덮어씀). beforeTooltipDraw는 실제로 그리기 직전 마지막에 호출되고 false를
+  // 반환하면 draw() 자체를 건너뛰므로, 여기서 최종적으로 표시 여부를 결정한다.
+  beforeTooltipDraw(chart) {
+    const hoverX = chart.__hoverX;
+    if (hoverX == null) return false;
+    const dsIndex = chart.data.datasets.findIndex(d => d.type === "candlestick");
+    if (dsIndex === -1) return true;
+    const active = chart.getActiveElements();
+    const candleItem = active.find(a => a.datasetIndex === dsIndex);
+    if (!candleItem) return true;
+    return isMouseOverCandleColumn(chart, hoverX, candleItem.element.x);
+  },
+};
+Chart.register(tooltipGatePlugin);
 
 function isMouseOverCandleColumn(chart, mouseX, elementX) {
   // chartjs-chart-financial의 캔들 hover-hitbox(intersect:true)는 실제 고가~저가 꼬리를
@@ -416,6 +443,20 @@ function resampleChartData(chart, interval) {
   };
 }
 
+const DEFAULT_VISIBLE_CANDLES = 300;
+
+function applyDefaultZoomWindow(chart) {
+  if (!chart) return;
+  const dsIndex = chart.data.datasets.findIndex(d => d.type === "candlestick");
+  if (dsIndex === -1) return;
+  const data = chart.data.datasets[dsIndex].data;
+  if (data.length <= DEFAULT_VISIBLE_CANDLES) return; // 전체가 300개 이하면 그대로 다 보여준다
+  const minX = data[data.length - DEFAULT_VISIBLE_CANDLES].x;
+  const padDs = chart.data.datasets.find(d => d.label === "__pad");
+  const maxX = (padDs && padDs.data.length) ? padDs.data[padDs.data.length - 1].x : data[data.length - 1].x;
+  chart.zoomScale("x", { min: minX, max: maxX }, "none");
+}
+
 function setInterval_(interval) {
   currentInterval = interval;
   document.querySelectorAll(".interval-btn").forEach(btn => {
@@ -427,6 +468,7 @@ function setInterval_(interval) {
       const ctx = document.getElementById("popupChart").getContext("2d");
       popupChartInstance.destroy();
       popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval), { isPopup: true }));
+      applyDefaultZoomWindow(popupChartInstance);
       requestAnimationFrame(() => { if (popupChartInstance) popupChartInstance.resize(); });
     }
   }
@@ -572,7 +614,10 @@ function renderResult(data) {
 }
 
 document.getElementById("resetZoomBtn").addEventListener("click", () => {
-  if (priceChartInstance) priceChartInstance.resetZoom();
+  if (priceChartInstance) {
+    priceChartInstance.resetZoom();
+    applyDefaultZoomWindow(priceChartInstance);
+  }
 });
 
 function renderChecklist(checks) {
@@ -637,14 +682,12 @@ function buildChartConfig(chart, opts) {
     data: {
       datasets: [
         {
-          // 참고: chartjs-chart-financial 라이브러리는 "up"/"down"을 실제 등락과 반대로 사용한다
-          // (close < open 인 하락봉에 backgroundColors.up 을, close > open 인 상승봉에
-          // backgroundColors.down 을 적용). 그래서 상승=빨강/하락=초록(국내 관행)을 만들려면
-          // down 에 빨강, up 에 초록을 넣어야 한다. (또한 이 라이브러리는 데이터셋의 "color"
-          // 속성을 읽지 않고 "backgroundColors"/"borderColors"를 읽는다.)
+          // 참고: chartjs-chart-financial 라이브러리는 데이터셋의 "color" 속성을 읽지 않고
+          // "backgroundColors"/"borderColors"(복수형)를 읽는다. up=상승(종가>시가),
+          // down=하락(종가<시가) 매핑은 실제 렌더링 픽셀 색상으로 직접 검증했다(2026-02-10).
           type: "candlestick", label: "가격", data: candleData,
-          backgroundColors: { down: "#ef4a5f", up: "#2fbf71", unchanged: "#9aa0b0" },
-          borderColors: { down: "#ef4a5f", up: "#2fbf71", unchanged: "#9aa0b0" },
+          backgroundColors: { up: "#ef4a5f", down: "#2fbf71", unchanged: "#9aa0b0" },
+          borderColors: { up: "#ef4a5f", down: "#2fbf71", unchanged: "#9aa0b0" },
           parsing: false,
           barPercentage: mobile ? 0.85 : 0.7,
           order: 1,
@@ -710,12 +753,7 @@ function buildChartConfig(chart, opts) {
         },
         tooltip: {
           enabled: dataDisplayEnabled,
-          filter: (item) => {
-            if (item.dataset.type === "bar" || item.dataset.label === "__pad") return false;
-            const hoverX = item.chart.__hoverX;
-            if (hoverX == null) return false;
-            return isMouseOverCandleColumn(item.chart, hoverX, item.element.x);
-          },
+          filter: (item) => item.dataset.type !== "bar" && item.dataset.label !== "__pad",
           callbacks: {
             label: (context) => {
               const raw = context.raw;
@@ -757,11 +795,13 @@ function buildChartConfig(chart, opts) {
   };
 }
 
-function renderChart(chart) {
+function renderChart(chart, opts) {
+  const resetZoom = !opts || opts.resetZoom !== false;
   lastChartData = chart;
   const ctx = document.getElementById("priceChart").getContext("2d");
   if (priceChartInstance) priceChartInstance.destroy();
   priceChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(chart, currentInterval)));
+  if (resetZoom) applyDefaultZoomWindow(priceChartInstance);
   requestAnimationFrame(() => { if (priceChartInstance) priceChartInstance.resize(); });
 }
 
@@ -774,6 +814,7 @@ function openChartPopup() {
   const ctx = document.getElementById("popupChart").getContext("2d");
   if (popupChartInstance) popupChartInstance.destroy();
   popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval), { isPopup: true }));
+  applyDefaultZoomWindow(popupChartInstance);
   requestAnimationFrame(() => { if (popupChartInstance) popupChartInstance.resize(); });
 }
 
@@ -789,7 +830,10 @@ function closeChartPopup() {
 document.getElementById("popupChartBtn").addEventListener("click", openChartPopup);
 document.getElementById("popupCloseBtn").addEventListener("click", closeChartPopup);
 document.getElementById("popupResetZoomBtn").addEventListener("click", () => {
-  if (popupChartInstance) popupChartInstance.resetZoom();
+  if (popupChartInstance) {
+    popupChartInstance.resetZoom();
+    applyDefaultZoomWindow(popupChartInstance);
+  }
 });
 document.getElementById("chartModal").addEventListener("click", (e) => {
   if (e.target.id === "chartModal") closeChartPopup();
@@ -846,7 +890,7 @@ async function pollQuote() {
     if (priceChartInstance) {
       const savedX = { min: priceChartInstance.scales.x.min, max: priceChartInstance.scales.x.max };
       const savedY = { min: priceChartInstance.scales.y.min, max: priceChartInstance.scales.y.max };
-      renderChart(lastChartData);
+      renderChart(lastChartData, { resetZoom: false });
       priceChartInstance.zoomScale("x", savedX, "none");
       priceChartInstance.zoomScale("y", savedY, "none");
     }
