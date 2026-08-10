@@ -72,7 +72,10 @@ def fetch_history(raw_ticker: str, period: str = "12y"):
 
     last_err = None
     for cand_ticker, cand_market in candidates:
-        cache_key = cand_ticker
+        # fetch_bulk_history(스크리닝, 기간이 짧음)와 캐시를 공유하면 어느 쪽이 먼저
+        # 채우느냐에 따라 차트에 필요한 긴 기간 데이터가 짧은 데이터로 덮일 수 있으므로
+        # 캐시 키에 기간을 포함해 서로 다른 기간 요청이 캐시를 공유하지 않게 한다.
+        cache_key = f"{cand_ticker}|{period}"
         with _CACHE_LOCK:
             cached = _HISTORY_CACHE.get(cache_key)
             if cached and time.time() - cached[0] < _CACHE_TTL:
@@ -99,7 +102,7 @@ def fetch_bulk_history(tickers, period: str = "16mo"):
     now = time.time()
     with _CACHE_LOCK:
         for t in tickers:
-            cached = _HISTORY_CACHE.get(t)
+            cached = _HISTORY_CACHE.get(f"{t}|{period}")
             if cached and now - cached[0] < _CACHE_TTL:
                 result[t] = cached[1]
             else:
@@ -130,7 +133,7 @@ def fetch_bulk_history(tickers, period: str = "16mo"):
                     if len(df) > 30:
                         result[t] = df
                         with _CACHE_LOCK:
-                            _HISTORY_CACHE[t] = (now, df)
+                            _HISTORY_CACHE[f"{t}|{period}"] = (now, df)
                 except Exception:
                     continue
 
