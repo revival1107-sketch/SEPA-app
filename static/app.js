@@ -26,6 +26,197 @@ const crosshairPlugin = {
 };
 Chart.register(crosshairPlugin);
 
+function positionAxisDragZones(chart) {
+  const wrap = chart.canvas.parentElement;
+  if (!wrap) return;
+  const yZone = wrap.querySelector(".axis-drag-y");
+  const xZone = wrap.querySelector(".axis-drag-x");
+  const area = chart.chartArea;
+  if (!area) return;
+  const w = chart.canvas.clientWidth;
+  const h = chart.canvas.clientHeight;
+  if (yZone) {
+    yZone.style.left = area.right + "px";
+    yZone.style.top = area.top + "px";
+    yZone.style.width = Math.max(0, w - area.right) + "px";
+    yZone.style.height = Math.max(0, area.bottom - area.top) + "px";
+  }
+  if (xZone) {
+    xZone.style.left = area.left + "px";
+    xZone.style.top = area.bottom + "px";
+    xZone.style.width = Math.max(0, area.right - area.left) + "px";
+    xZone.style.height = Math.max(0, h - area.bottom) + "px";
+  }
+}
+
+const axisZoneSyncPlugin = {
+  id: "axisZoneSync",
+  afterLayout(chart) {
+    positionAxisDragZones(chart);
+  },
+};
+Chart.register(axisZoneSyncPlugin);
+
+function setupAxisDrag(zoneEl, chartGetter, axis) {
+  if (!zoneEl) return;
+  const K = 0.006;
+  let dragging = false;
+  let startPos = 0;
+  let startMin = 0;
+  let startMax = 0;
+
+  zoneEl.addEventListener("pointerdown", (e) => {
+    const chart = chartGetter();
+    if (!chart || !chart.scales[axis]) return;
+    dragging = true;
+    startPos = axis === "y" ? e.clientY : e.clientX;
+    startMin = chart.scales[axis].min;
+    startMax = chart.scales[axis].max;
+    try { zoneEl.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
+    e.preventDefault();
+  });
+
+  zoneEl.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const chart = chartGetter();
+    if (!chart) return;
+    const pos = axis === "y" ? e.clientY : e.clientX;
+    const rawDelta = pos - startPos;
+    const signedDelta = axis === "y" ? rawDelta : -rawDelta;
+    const factor = Math.exp(signedDelta * K);
+    const range = startMax - startMin;
+    const newRange = range * factor;
+    const center = (startMax + startMin) / 2;
+    chart.zoomScale(axis, { min: center - newRange / 2, max: center + newRange / 2 }, "none");
+  });
+
+  const endDrag = () => { dragging = false; };
+  zoneEl.addEventListener("pointerup", endDrag);
+  zoneEl.addEventListener("pointercancel", endDrag);
+}
+
+function setupPlotPan(canvasId, chartGetter) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+
+  function inPlotArea(chart, clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const area = chart.chartArea;
+    return area && x >= area.left && x <= area.right && y >= area.top && y <= area.bottom;
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    const chart = chartGetter();
+    if (!chart || !inPlotArea(chart, e.clientX, e.clientY)) return;
+    dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const chart = chartGetter();
+    if (!chart) return;
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    if (dx === 0 && dy === 0) return;
+    chart.pan({ x: dx, y: dy }, undefined, "none");
+  });
+
+  const endDrag = () => { dragging = false; };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+}
+
+setupPlotPan("priceChart", () => priceChartInstance);
+setupPlotPan("popupChart", () => popupChartInstance);
+
+setupAxisDrag(document.getElementById("priceChartYAxisDrag"), () => priceChartInstance, "y");
+setupAxisDrag(document.getElementById("priceChartXAxisDrag"), () => priceChartInstance, "x");
+setupAxisDrag(document.getElementById("popupChartYAxisDrag"), () => popupChartInstance, "y");
+setupAxisDrag(document.getElementById("popupChartXAxisDrag"), () => popupChartInstance, "x");
+
+// ---- 봉 주기(일봉/주봉/월봉) ----
+let currentInterval = "day";
+
+function getPeriodKey(dateStr, interval) {
+  const d = new Date(dateStr + "T00:00:00");
+  if (interval === "month") {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }
+  const day = d.getDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diff);
+  return monday.toISOString().slice(0, 10);
+}
+
+function resampleChartData(chart, interval) {
+  if (interval === "day") return chart;
+  const n = chart.dates.length;
+  const buckets = [];
+  const indexByKey = new Map();
+  for (let i = 0; i < n; i++) {
+    const key = getPeriodKey(chart.dates[i], interval);
+    if (!indexByKey.has(key)) {
+      indexByKey.set(key, buckets.length);
+      buckets.push({
+        date: chart.dates[i],
+        open: chart.open[i], high: chart.high[i], low: chart.low[i], close: chart.close[i],
+        volume: 0, sma50: null, sma150: null, sma200: null,
+      });
+    }
+    const b = buckets[indexByKey.get(key)];
+    b.date = chart.dates[i];
+    if (chart.high[i] != null) b.high = b.high == null ? chart.high[i] : Math.max(b.high, chart.high[i]);
+    if (chart.low[i] != null) b.low = b.low == null ? chart.low[i] : Math.min(b.low, chart.low[i]);
+    if (chart.close[i] != null) b.close = chart.close[i];
+    if (chart.volume[i] != null) b.volume += chart.volume[i];
+    if (chart.sma50[i] != null) b.sma50 = chart.sma50[i];
+    if (chart.sma150[i] != null) b.sma150 = chart.sma150[i];
+    if (chart.sma200[i] != null) b.sma200 = chart.sma200[i];
+  }
+  return {
+    dates: buckets.map(b => b.date),
+    open: buckets.map(b => b.open),
+    high: buckets.map(b => b.high),
+    low: buckets.map(b => b.low),
+    close: buckets.map(b => b.close),
+    volume: buckets.map(b => b.volume),
+    sma50: buckets.map(b => b.sma50),
+    sma150: buckets.map(b => b.sma150),
+    sma200: buckets.map(b => b.sma200),
+  };
+}
+
+function setInterval_(interval) {
+  currentInterval = interval;
+  document.querySelectorAll(".interval-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.interval === interval);
+  });
+  if (lastChartData) {
+    if (priceChartInstance) renderChart(lastChartData);
+    if (popupChartInstance) {
+      const ctx = document.getElementById("popupChart").getContext("2d");
+      popupChartInstance.destroy();
+      popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval)));
+      requestAnimationFrame(() => { if (popupChartInstance) popupChartInstance.resize(); });
+    }
+  }
+}
+
+document.querySelectorAll(".interval-btn").forEach(btn => {
+  btn.addEventListener("click", () => setInterval_(btn.dataset.interval));
+});
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => {});
@@ -144,6 +335,10 @@ function renderResult(data) {
   }
 
   renderChecklist(tt.checks);
+  currentInterval = "day";
+  document.querySelectorAll(".interval-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.interval === "day");
+  });
   renderChart(data.chart);
   renderVcp(data.vcp);
   renderRs(data);
@@ -204,7 +399,7 @@ function buildChartConfig(chart) {
       datasets: [
         {
           type: "candlestick", label: "가격", data: candleData,
-          color: { up: "#2fbf71", down: "#ef4a5f", unchanged: "#9aa0b0" },
+          color: { up: "#ef4a5f", down: "#2fbf71", unchanged: "#9aa0b0" },
           parsing: false,
           barPercentage: mobile ? 0.85 : 0.7,
           order: 1,
@@ -249,7 +444,7 @@ function buildChartConfig(chart) {
       plugins: {
         legend: { labels: { color: "#e6e8ef", filter: (item) => item.text !== "거래량", font: { size: mobile ? 11 : 12 }, boxWidth: mobile ? 12 : 24 } },
         zoom: {
-          pan: { enabled: true, mode: "xy" },
+          pan: { enabled: false },
           zoom: {
             wheel: { enabled: true },
             pinch: { enabled: true },
@@ -293,7 +488,7 @@ function renderChart(chart) {
   lastChartData = chart;
   const ctx = document.getElementById("priceChart").getContext("2d");
   if (priceChartInstance) priceChartInstance.destroy();
-  priceChartInstance = new Chart(ctx, buildChartConfig(chart));
+  priceChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(chart, currentInterval)));
   requestAnimationFrame(() => { if (priceChartInstance) priceChartInstance.resize(); });
 }
 
@@ -305,7 +500,7 @@ function openChartPopup() {
   document.body.style.overflow = "hidden";
   const ctx = document.getElementById("popupChart").getContext("2d");
   if (popupChartInstance) popupChartInstance.destroy();
-  popupChartInstance = new Chart(ctx, buildChartConfig(lastChartData));
+  popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval)));
   requestAnimationFrame(() => { if (popupChartInstance) popupChartInstance.resize(); });
 }
 

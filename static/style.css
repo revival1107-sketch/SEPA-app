@@ -300,9 +300,18 @@ table.screen-table tr:hover { background: rgba(255,255,255,0.03); cursor: pointe
 .price-chart-wrap { position: relative; height: 300px; width: 100%; }
 .price-chart-wrap canvas { width: 100% !important; height: 100% !important; }
 
+.chart-interval-row { display: flex; gap: 6px; margin-bottom: 10px; }
+
+.axis-drag-zone { position: absolute; z-index: 5; touch-action: none; }
+.axis-drag-y { cursor: ns-resize; }
+.axis-drag-x { cursor: ew-resize; }
+
 .chart-modal {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 1000;
   background: rgba(4, 5, 8, 0.82);
   display: flex;
@@ -355,11 +364,11 @@ table.screen-table tr:hover { background: rgba(255,255,255,0.03); cursor: pointe
     min-height: 40px;
   }
 
-  .chart-header-actions { gap: 6px; }
+  .chart-header-actions { gap: 6px; flex-wrap: wrap; }
   .card-header-row { flex-wrap: wrap; gap: 8px; }
 
   .chart-modal { padding: 0; }
-  .chart-modal-inner { max-width: none; max-height: none; border-radius: 0; height: 100dvh; }
-  .chart-modal-header { padding: 12px 14px; }
-  .chart-modal-canvas-wrap { padding: 8px; }
+  .chart-modal-inner { max-width: none; max-height: none; border-radius: 0; }
+  .chart-modal-header { padding: 12px 14px; flex-wrap: wrap; row-gap: 8px; }
+  .chart-modal-canvas-wrap { padding: 6px; }
 }
