@@ -29,10 +29,17 @@ function drawCrosshairLabel(ctx, text, cx, cy, align, bounds) {
   ctx.fillText(text, boxX + paddingX, boxY + boxH / 2 + 0.5);
 }
 
+function formatLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function formatCrosshairDate(value) {
   const d = new Date(value);
   if (isNaN(d.getTime())) return "";
-  return d.toISOString().slice(0, 10);
+  return formatLocalDate(d);
 }
 
 function formatCrosshairPrice(value) {
@@ -40,18 +47,38 @@ function formatCrosshairPrice(value) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+function findNearestCandleByPixel(xScale, data, xPixel) {
+  // Chart.js의 "index" 모드 히트테스트는 데이터 경계(특히 맨 마지막 캔들) 부근에서
+  // 한 칸 옆 인덱스를 잘못 고르는 경우가 있어, 우리가 직접 이진 탐색으로 가장 가까운
+  // 캔들을 찾는다(십자선 위치·날짜가 실제 마우스 x좌표와 항상 일치하도록).
+  let lo = 0, hi = data.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (xScale.getPixelForValue(data[mid].x) < xPixel) lo = mid + 1; else hi = mid;
+  }
+  if (lo > 0) {
+    const prevPx = xScale.getPixelForValue(data[lo - 1].x);
+    const curPx = xScale.getPixelForValue(data[lo].x);
+    if (Math.abs(xPixel - prevPx) < Math.abs(curPx - xPixel)) return lo - 1;
+  }
+  return lo;
+}
+
 const crosshairPlugin = {
   id: "crosshair",
   afterDraw(chart) {
-    const active = chart.getActiveElements();
-    if (!active || !active.length) return;
+    const ev = chart._lastEvent;
     const { ctx, chartArea, scales } = chart;
-    const { x } = active[0].element;
-    let y = active[0].element.y;
-    if (chart._lastEvent && typeof chart._lastEvent.y === "number") {
-      y = chart._lastEvent.y;
-    }
-    y = Math.max(chartArea.top, Math.min(y, chartArea.bottom));
+    if (!ev || typeof ev.x !== "number" || typeof ev.y !== "number") return;
+    if (ev.x < chartArea.left || ev.x > chartArea.right || ev.y < chartArea.top || ev.y > chartArea.bottom) return;
+    const dsIndex = chart.data.datasets.findIndex(d => d.type === "candlestick");
+    const candleData = dsIndex !== -1 ? chart.data.datasets[dsIndex].data : [];
+    if (!candleData.length || !scales.x) return;
+
+    const nearestIdx = findNearestCandleByPixel(scales.x, candleData, ev.x);
+    const point = candleData[nearestIdx];
+    const x = scales.x.getPixelForValue(point.x);
+    const y = Math.max(chartArea.top, Math.min(ev.y, chartArea.bottom));
     ctx.save();
     ctx.setLineDash([4, 4]);
     ctx.strokeStyle = "rgba(226,230,238,0.9)";
@@ -67,8 +94,8 @@ const crosshairPlugin = {
     ctx.setLineDash([]);
 
     const bounds = { ...chartArea, canvasWidth: chart.width, canvasHeight: chart.height };
-    if (scales.x) {
-      const dateLabel = formatCrosshairDate(scales.x.getValueForPixel(x));
+    {
+      const dateLabel = formatCrosshairDate(point.x);
       if (dateLabel) drawCrosshairLabel(ctx, dateLabel, x, y, "top", bounds);
     }
     if (scales.y) {
@@ -122,6 +149,92 @@ const currentPricePlugin = {
   },
 };
 Chart.register(currentPricePlugin);
+
+const MIN_CANDLE_WIDTH_PX = 1.2;
+const minCandleWidthPlugin = {
+  id: "minCandleWidth",
+  // 10년치처럼 캔들 개수가 매우 많으면 캔들 하나당 폭이 1px보다 훨씬 작아져
+  // 사실상 화면에 그려지지 않는다(서브픽셀). 폭이 너무 작을 때만 최소 폭으로 보정한다.
+  beforeDatasetsDraw(chart) {
+    const dsIndex = chart.data.datasets.findIndex(d => d.type === "candlestick");
+    if (dsIndex === -1) return;
+    const meta = chart.getDatasetMeta(dsIndex);
+    if (!meta || !meta.data) return;
+    meta.data.forEach(el => {
+      if (typeof el.width === "number" && el.width < MIN_CANDLE_WIDTH_PX) {
+        el.width = MIN_CANDLE_WIDTH_PX;
+      }
+    });
+  },
+};
+Chart.register(minCandleWidthPlugin);
+
+const hoverTrackerPlugin = {
+  id: "hoverTracker",
+  // chart._lastEvent는 tooltip.filter가 호출되는 시점 기준으로 한 이벤트 주기 뒤늦게
+  // 갱신되어(afterDraw 시점에야 최신값이 됨), tooltip.filter 안에서 읽으면 "이전" 마우스
+  // 위치를 보게 된다. beforeEvent는 그보다 먼저 실행되므로 여기서 직접 현재 위치를 저장한다.
+  beforeEvent(chart, args) {
+    const event = args.event;
+    if (event.type === "mousemove" || event.type === "mouseover") {
+      chart.__hoverX = event.x;
+      chart.__hoverY = event.y;
+    } else if (event.type === "mouseout") {
+      chart.__hoverX = null;
+      chart.__hoverY = null;
+    }
+  },
+};
+Chart.register(hoverTrackerPlugin);
+
+function isMouseOverCandleColumn(chart, mouseX, elementX) {
+  // chartjs-chart-financial의 캔들 hover-hitbox(intersect:true)는 실제 고가~저가 꼬리를
+  // 다 덮지 못하는 버그가 있어(고가 쪽 꼬리가 거의 항상 hitbox 밖), 대신 현재 확대 배율
+  // 기준으로 "캔들 한 칸" 간격을 직접 계산해 마우스가 그 칸 안에 있는지 판정한다.
+  const dsIndex = chart.data.datasets.findIndex(d => d.type === "candlestick");
+  if (dsIndex === -1) return true;
+  const data = chart.data.datasets[dsIndex].data;
+  if (data.length < 2 || !chart.scales.x) return true;
+  const idx = findNearestCandleByPixel(chart.scales.x, data, elementX);
+  const neighborIdx = idx + 1 < data.length ? idx + 1 : idx - 1;
+  if (neighborIdx < 0) return true;
+  const spacing = Math.abs(
+    chart.scales.x.getPixelForValue(data[neighborIdx].x) - chart.scales.x.getPixelForValue(data[idx].x)
+  ) || 20;
+  return Math.abs(mouseX - elementX) <= Math.max(spacing * 0.6, 3);
+}
+
+const topLeftPricePlugin = {
+  id: "topLeftPrice",
+  afterDraw(chart) {
+    const candleDataset = chart.data.datasets.find(d => d.type === "candlestick");
+    if (!candleDataset || candleDataset.data.length < 1) return;
+    const data = candleDataset.data;
+    const last = data[data.length - 1];
+    if (!last || last.c == null) return;
+    const prev = data.length >= 2 ? data[data.length - 2] : null;
+    const prevClose = prev && prev.c != null ? prev.c : null;
+    const up = prevClose != null ? last.c >= prevClose : last.c >= last.o;
+    const color = up ? "#ef4a5f" : "#2fbf71";
+
+    let text = formatCrosshairPrice(last.c);
+    if (prevClose != null && prevClose !== 0) {
+      const pct = (last.c / prevClose - 1) * 100;
+      const sign = pct >= 0 ? "+" : "";
+      text += `  (${sign}${pct.toFixed(2)}%)`;
+    }
+
+    const { ctx, chartArea } = chart;
+    ctx.save();
+    ctx.font = "bold 13px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillStyle = color;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    ctx.fillText(text, chartArea.left + 8, chartArea.top + 6);
+    ctx.restore();
+  },
+};
+Chart.register(topLeftPricePlugin);
 
 function positionAxisDragZones(chart) {
   const wrap = chart.canvas.parentElement;
@@ -252,6 +365,9 @@ let currentInterval = "day";
 
 function getPeriodKey(dateStr, interval) {
   const d = new Date(dateStr + "T00:00:00");
+  if (interval === "year") {
+    return `${d.getFullYear()}`;
+  }
   if (interval === "month") {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   }
@@ -259,7 +375,7 @@ function getPeriodKey(dateStr, interval) {
   const diff = (day === 0 ? -6 : 1) - day;
   const monday = new Date(d);
   monday.setDate(d.getDate() + diff);
-  return monday.toISOString().slice(0, 10);
+  return formatLocalDate(monday);
 }
 
 function resampleChartData(chart, interval) {
@@ -521,8 +637,14 @@ function buildChartConfig(chart, opts) {
     data: {
       datasets: [
         {
+          // 참고: chartjs-chart-financial 라이브러리는 "up"/"down"을 실제 등락과 반대로 사용한다
+          // (close < open 인 하락봉에 backgroundColors.up 을, close > open 인 상승봉에
+          // backgroundColors.down 을 적용). 그래서 상승=빨강/하락=초록(국내 관행)을 만들려면
+          // down 에 빨강, up 에 초록을 넣어야 한다. (또한 이 라이브러리는 데이터셋의 "color"
+          // 속성을 읽지 않고 "backgroundColors"/"borderColors"를 읽는다.)
           type: "candlestick", label: "가격", data: candleData,
-          color: { up: "#ef4a5f", down: "#2fbf71", unchanged: "#9aa0b0" },
+          backgroundColors: { down: "#ef4a5f", up: "#2fbf71", unchanged: "#9aa0b0" },
+          borderColors: { down: "#ef4a5f", up: "#2fbf71", unchanged: "#9aa0b0" },
           parsing: false,
           barPercentage: mobile ? 0.85 : 0.7,
           order: 1,
@@ -588,7 +710,12 @@ function buildChartConfig(chart, opts) {
         },
         tooltip: {
           enabled: dataDisplayEnabled,
-          filter: (item) => item.dataset.type !== "bar" && item.dataset.label !== "__pad",
+          filter: (item) => {
+            if (item.dataset.type === "bar" || item.dataset.label === "__pad") return false;
+            const hoverX = item.chart.__hoverX;
+            if (hoverX == null) return false;
+            return isMouseOverCandleColumn(item.chart, hoverX, item.element.x);
+          },
           callbacks: {
             label: (context) => {
               const raw = context.raw;
@@ -673,7 +800,7 @@ document.getElementById("popupDataDisplayBtn").addEventListener("click", toggleD
 // ---- 실시간(지연 시세) 자동 갱신 ----
 let liveUpdateEnabled = false;
 let liveUpdateTimer = null;
-const LIVE_UPDATE_INTERVAL_MS = 20000;
+const LIVE_UPDATE_INTERVAL_MS = 15000; // 서버 시세 캐시(app/data.py _QUOTE_CACHE_TTL)가 15초 단위라 이보다 짧게 폴링해도 더 새 데이터를 받지 못한다
 
 function updateLastBarWithQuote(quote) {
   if (!lastChartData || !lastChartData.dates.length) return;
