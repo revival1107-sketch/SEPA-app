@@ -130,18 +130,23 @@ function positionAxisDragZones(chart) {
   const xZone = wrap.querySelector(".axis-drag-x");
   const area = chart.chartArea;
   if (!area) return;
+  // 드래그 영역은 wrap의 패딩 박스를 기준으로 절대 위치가 계산되므로,
+  // 캔버스가 wrap 안에서 패딩만큼 밀려나 있으면(예: 팝업의 16px padding)
+  // 캔버스 기준 좌표(chartArea)에 그 오프셋을 더해줘야 실제 캔들 위치와 정렬된다.
+  const offsetX = chart.canvas.offsetLeft;
+  const offsetY = chart.canvas.offsetTop;
   const w = chart.canvas.clientWidth;
   const h = chart.canvas.clientHeight;
   const buffer = 8; // 마지막 캔들/축 라벨과 드래그 영역이 겹치지 않도록 여백을 둔다
   if (yZone) {
-    yZone.style.left = (area.right + buffer) + "px";
-    yZone.style.top = area.top + "px";
+    yZone.style.left = (offsetX + area.right + buffer) + "px";
+    yZone.style.top = (offsetY + area.top) + "px";
     yZone.style.width = Math.max(0, w - area.right - buffer) + "px";
     yZone.style.height = Math.max(0, area.bottom - area.top) + "px";
   }
   if (xZone) {
-    xZone.style.left = area.left + "px";
-    xZone.style.top = (area.bottom + buffer) + "px";
+    xZone.style.left = (offsetX + area.left) + "px";
+    xZone.style.top = (offsetY + area.bottom + buffer) + "px";
     xZone.style.width = Math.max(0, area.right - area.left) + "px";
     xZone.style.height = Math.max(0, h - area.bottom - buffer) + "px";
   }
