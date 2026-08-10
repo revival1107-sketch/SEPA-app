@@ -721,11 +721,18 @@ function buildChartConfig(chart, opts) {
               const raw = context.raw;
               const vol = volumeByX[raw.x];
               if (context.dataset.type === "candlestick") {
+                const prevClose = context.dataIndex > 0 ? candleData[context.dataIndex - 1].c : null;
+                const withChange = (label, value) => {
+                  if (prevClose == null || prevClose === 0) return `${label} ${value.toLocaleString()}`;
+                  const pct = (value / prevClose - 1) * 100;
+                  const sign = pct >= 0 ? "+" : "";
+                  return `${label} ${value.toLocaleString()} (${sign}${pct.toFixed(2)}%)`;
+                };
                 const parts = [
-                  `시가 ${raw.o.toLocaleString()}`,
-                  `고가 ${raw.h.toLocaleString()}`,
-                  `저가 ${raw.l.toLocaleString()}`,
-                  `종가 ${raw.c.toLocaleString()}`,
+                  withChange("시가", raw.o),
+                  withChange("고가", raw.h),
+                  withChange("저가", raw.l),
+                  withChange("종가", raw.c),
                 ];
                 if (vol != null) parts.push(`거래량 ${vol.toLocaleString()}`);
                 return parts;
@@ -734,6 +741,14 @@ function buildChartConfig(chart, opts) {
                 return `거래량 ${raw.y.toLocaleString()}`;
               }
               return `${context.dataset.label} ${raw.y.toLocaleString()}`;
+            },
+            labelTextColor: (context) => {
+              if (context.dataset.type === "candlestick") {
+                const raw = context.raw;
+                const prevClose = context.dataIndex > 0 ? candleData[context.dataIndex - 1].c : null;
+                if (prevClose != null) return raw.c >= prevClose ? "#ef4a5f" : "#2fbf71";
+              }
+              return "#e6e8ef";
             },
           },
         },
