@@ -46,7 +46,12 @@ const crosshairPlugin = {
     const active = chart.getActiveElements();
     if (!active || !active.length) return;
     const { ctx, chartArea, scales } = chart;
-    const { x, y } = active[0].element;
+    const { x } = active[0].element;
+    let y = active[0].element.y;
+    if (chart._lastEvent && typeof chart._lastEvent.y === "number") {
+      y = chart._lastEvent.y;
+    }
+    y = Math.max(chartArea.top, Math.min(y, chartArea.bottom));
     ctx.save();
     ctx.setLineDash([4, 4]);
     ctx.strokeStyle = "rgba(226,230,238,0.9)";
