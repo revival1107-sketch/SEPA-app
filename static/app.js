@@ -2,12 +2,50 @@ const API_BASE = "";
 let priceChartInstance = null;
 let dataDisplayEnabled = false;
 
+function drawCrosshairLabel(ctx, text, cx, cy, align, bounds) {
+  ctx.font = "11px -apple-system, BlinkMacSystemFont, sans-serif";
+  const paddingX = 6;
+  const boxH = 18;
+  const textWidth = ctx.measureText(text).width;
+  const boxW = textWidth + paddingX * 2;
+  let boxX, boxY;
+  if (align === "top") {
+    boxX = cx - boxW / 2;
+    boxY = bounds.top;
+  } else {
+    boxX = bounds.right;
+    boxY = cy - boxH / 2;
+  }
+  boxX = Math.max(bounds.left, Math.min(boxX, bounds.canvasWidth - boxW));
+  boxY = Math.max(0, Math.min(boxY, bounds.canvasHeight - boxH));
+  ctx.fillStyle = "rgba(45,52,68,0.95)";
+  ctx.fillRect(boxX, boxY, boxW, boxH);
+  ctx.strokeStyle = "rgba(226,230,238,0.4)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(boxX + 0.5, boxY + 0.5, boxW - 1, boxH - 1);
+  ctx.fillStyle = "#e6e8ef";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.fillText(text, boxX + paddingX, boxY + boxH / 2 + 0.5);
+}
+
+function formatCrosshairDate(value) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function formatCrosshairPrice(value) {
+  if (value == null || isNaN(value)) return "";
+  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
 const crosshairPlugin = {
   id: "crosshair",
   afterDraw(chart) {
     const active = chart.getActiveElements();
     if (!active || !active.length) return;
-    const { ctx, chartArea } = chart;
+    const { ctx, chartArea, scales } = chart;
     const { x, y } = active[0].element;
     ctx.save();
     ctx.setLineDash([4, 4]);
@@ -21,6 +59,17 @@ const crosshairPlugin = {
     ctx.moveTo(chartArea.left, y);
     ctx.lineTo(chartArea.right, y);
     ctx.stroke();
+    ctx.setLineDash([]);
+
+    const bounds = { ...chartArea, canvasWidth: chart.width, canvasHeight: chart.height };
+    if (scales.x) {
+      const dateLabel = formatCrosshairDate(scales.x.getValueForPixel(x));
+      if (dateLabel) drawCrosshairLabel(ctx, dateLabel, x, y, "top", bounds);
+    }
+    if (scales.y) {
+      const priceLabel = formatCrosshairPrice(scales.y.getValueForPixel(y));
+      if (priceLabel) drawCrosshairLabel(ctx, priceLabel, x, y, "right", bounds);
+    }
     ctx.restore();
   },
 };
@@ -128,7 +177,7 @@ function setupPlotPan(canvasId, chartGetter) {
     lastX = e.clientX;
     lastY = e.clientY;
     if (dx === 0 && dy === 0) return;
-    chart.pan({ x: dx, y: dy }, undefined, "none");
+    chart.pan({ x: -dx, y: -dy }, undefined, "none");
   });
 
   const endDrag = () => { dragging = false; };
