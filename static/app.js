@@ -177,7 +177,7 @@ function setupPlotPan(canvasId, chartGetter) {
     lastX = e.clientX;
     lastY = e.clientY;
     if (dx === 0 && dy === 0) return;
-    chart.pan({ x: -dx, y: -dy }, undefined, "none");
+    chart.pan({ x: dx, y: dy }, undefined, "none");
   });
 
   const endDrag = () => { dragging = false; };
@@ -443,7 +443,6 @@ function buildChartConfig(chart) {
   const volumeData = chart.dates.map((d, i) => ({ x: points[i], y: chart.volume[i] }));
 
   return {
-    type: "candlestick",
     data: {
       datasets: [
         {
@@ -468,6 +467,7 @@ function buildChartConfig(chart) {
       animation: false,
       events: ["mousemove", "mouseout", "click", "touchstart", "touchmove", "mousedown", "mouseup"],
       interaction: { mode: "index", intersect: false },
+      hover: { mode: "index", intersect: false },
       scales: {
         x: {
           type: "timeseries",
