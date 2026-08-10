@@ -80,6 +80,49 @@ const crosshairPlugin = {
 };
 Chart.register(crosshairPlugin);
 
+const currentPricePlugin = {
+  id: "currentPrice",
+  afterDraw(chart) {
+    const candleDataset = chart.data.datasets.find(d => d.type === "candlestick");
+    if (!candleDataset || !candleDataset.data.length) return;
+    const last = candleDataset.data[candleDataset.data.length - 1];
+    if (!last || last.c == null) return;
+    const { ctx, chartArea, scales } = chart;
+    if (!scales.y) return;
+    const rawY = scales.y.getPixelForValue(last.c);
+    if (rawY < chartArea.top - 30 || rawY > chartArea.bottom + 30) return;
+    const y = Math.max(chartArea.top, Math.min(rawY, chartArea.bottom));
+    const color = last.c >= last.o ? "#ef4a5f" : "#2fbf71";
+
+    ctx.save();
+    ctx.setLineDash([5, 3]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(chartArea.left, y);
+    ctx.lineTo(chartArea.right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const label = formatCrosshairPrice(last.c);
+    ctx.font = "11px -apple-system, BlinkMacSystemFont, sans-serif";
+    const paddingX = 6;
+    const boxH = 18;
+    const textWidth = ctx.measureText(label).width;
+    const boxW = textWidth + paddingX * 2;
+    const boxX = chartArea.right;
+    const boxY = Math.max(0, Math.min(y - boxH / 2, chart.height - boxH));
+    ctx.fillStyle = color;
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.fillStyle = "#ffffff";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText(label, boxX + paddingX, boxY + boxH / 2 + 0.5);
+    ctx.restore();
+  },
+};
+Chart.register(currentPricePlugin);
+
 function positionAxisDragZones(chart) {
   const wrap = chart.canvas.parentElement;
   if (!wrap) return;
@@ -89,17 +132,18 @@ function positionAxisDragZones(chart) {
   if (!area) return;
   const w = chart.canvas.clientWidth;
   const h = chart.canvas.clientHeight;
+  const buffer = 8; // 마지막 캔들/축 라벨과 드래그 영역이 겹치지 않도록 여백을 둔다
   if (yZone) {
-    yZone.style.left = area.right + "px";
+    yZone.style.left = (area.right + buffer) + "px";
     yZone.style.top = area.top + "px";
-    yZone.style.width = Math.max(0, w - area.right) + "px";
+    yZone.style.width = Math.max(0, w - area.right - buffer) + "px";
     yZone.style.height = Math.max(0, area.bottom - area.top) + "px";
   }
   if (xZone) {
     xZone.style.left = area.left + "px";
-    xZone.style.top = area.bottom + "px";
+    xZone.style.top = (area.bottom + buffer) + "px";
     xZone.style.width = Math.max(0, area.right - area.left) + "px";
-    xZone.style.height = Math.max(0, h - area.bottom) + "px";
+    xZone.style.height = Math.max(0, h - area.bottom - buffer) + "px";
   }
 }
 
