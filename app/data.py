@@ -17,6 +17,9 @@ _HISTORY_CACHE = {}  # ticker -> (timestamp, df)
 _KR_NAME_CACHE = {}  # code6 -> name
 _CACHE_TTL = 60 * 15  # 15분
 
+_QUOTE_CACHE = {}  # ticker -> (timestamp, quote_dict)
+_QUOTE_CACHE_TTL = 15  # 초. 여러 클라이언트가 동시에 폴링해도 야후에 과도한 요청을 보내지 않도록 함
+
 
 def normalize_ticker(raw: str):
     """사용자 입력을 (야후 티커, 시장코드) 로 정규화한다.
@@ -373,3 +376,31 @@ def fetch_fundamentals(ticker: str):
     out["operating_income_quarters"] = fetch_operating_income_quarters(ticker)
 
     return out
+
+
+def fetch_quote(ticker: str):
+    """실시간(지연 시세) 자동 갱신용 경량 조회. 전체 히스토리를 다시 받지 않고 현재가/당일 고저/거래량만 가져온다."""
+    now = time.time()
+    with _CACHE_LOCK:
+        cached = _QUOTE_CACHE.get(ticker)
+        if cached and now - cached[0] < _QUOTE_CACHE_TTL:
+            return cached[1]
+
+    fi = dict(yf.Ticker(ticker).fast_info)
+    result = {
+        "ticker": ticker,
+        "price": fi.get("lastPrice"),
+        "open": fi.get("open"),
+        "high": fi.get("dayHigh"),
+        "low": fi.get("dayLow"),
+        "previous_close": fi.get("previousClose") or fi.get("regularMarketPreviousClose"),
+        "volume": fi.get("lastVolume"),
+        "currency": fi.get("currency"),
+        "server_time": now,
+    }
+    if result["price"] is None:
+        raise ValueError(f"'{ticker}' 현재가를 가져올 수 없습니다.")
+
+    with _CACHE_LOCK:
+        _QUOTE_CACHE[ticker] = (now, result)
+    return result

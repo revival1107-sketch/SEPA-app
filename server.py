@@ -109,6 +109,18 @@ def screen():
     return jsonify({market: candidates})
 
 
+@app.get("/api/quote")
+def get_quote():
+    ticker = request.args.get("ticker", "")
+    if not ticker:
+        return jsonify({"error": "ticker 파라미터가 필요합니다."}), 400
+    try:
+        q = data.fetch_quote(ticker)
+        return jsonify(q)
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": str(e)}), 500
+
+
 @app.get("/api/watchlist")
 def get_watchlist():
     if not watchlist_store.is_configured():

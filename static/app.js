@@ -393,6 +393,12 @@ function renderResult(data) {
   document.querySelectorAll(".interval-btn").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.interval === "day");
   });
+  if (liveUpdateEnabled) {
+    liveUpdateEnabled = false;
+    document.getElementById("liveUpdateBtn").classList.remove("active");
+    document.getElementById("popupLiveUpdateBtn").classList.remove("active");
+    stopLiveUpdate();
+  }
   renderChart(data.chart);
   renderVcp(data.vcp);
   renderRs(data);
@@ -592,6 +598,82 @@ function toggleDataDisplay() {
 
 document.getElementById("dataDisplayBtn").addEventListener("click", toggleDataDisplay);
 document.getElementById("popupDataDisplayBtn").addEventListener("click", toggleDataDisplay);
+
+// ---- 실시간(지연 시세) 자동 갱신 ----
+let liveUpdateEnabled = false;
+let liveUpdateTimer = null;
+const LIVE_UPDATE_INTERVAL_MS = 20000;
+
+function updateLastBarWithQuote(quote) {
+  if (!lastChartData || !lastChartData.dates.length) return;
+  const i = lastChartData.dates.length - 1;
+  if (quote.high != null) lastChartData.high[i] = lastChartData.high[i] == null ? quote.high : Math.max(lastChartData.high[i], quote.high);
+  if (quote.low != null) lastChartData.low[i] = lastChartData.low[i] == null ? quote.low : Math.min(lastChartData.low[i], quote.low);
+  if (quote.price != null) lastChartData.close[i] = quote.price;
+  if (quote.volume != null) lastChartData.volume[i] = quote.volume;
+}
+
+function setLiveUpdateStatus(text) {
+  document.getElementById("liveUpdateStatus").textContent = text;
+  document.getElementById("popupLiveUpdateStatus").textContent = text;
+}
+
+async function pollQuote() {
+  if (!currentAnalyzed) return;
+  const tickerAtStart = currentAnalyzed.ticker;
+  try {
+    const res = await fetch(`${API_BASE}/api/quote?ticker=${encodeURIComponent(tickerAtStart)}`);
+    const q = await res.json();
+    if (!currentAnalyzed || currentAnalyzed.ticker !== tickerAtStart) return; // 폴링 중 종목이 바뀐 경우 무시
+    if (!res.ok) throw new Error(q.error || "실시간 시세 조회 실패");
+
+    document.getElementById("resPrice").textContent = q.price.toLocaleString();
+    updateLastBarWithQuote(q);
+
+    if (priceChartInstance) {
+      const savedX = { min: priceChartInstance.scales.x.min, max: priceChartInstance.scales.x.max };
+      const savedY = { min: priceChartInstance.scales.y.min, max: priceChartInstance.scales.y.max };
+      renderChart(lastChartData);
+      priceChartInstance.zoomScale("x", savedX, "none");
+      priceChartInstance.zoomScale("y", savedY, "none");
+    }
+
+    if (popupChartInstance) {
+      const savedX = { min: popupChartInstance.scales.x.min, max: popupChartInstance.scales.x.max };
+      const savedY = { min: popupChartInstance.scales.y.min, max: popupChartInstance.scales.y.max };
+      const ctx = document.getElementById("popupChart").getContext("2d");
+      popupChartInstance.destroy();
+      popupChartInstance = new Chart(ctx, buildChartConfig(resampleChartData(lastChartData, currentInterval)));
+      popupChartInstance.zoomScale("x", savedX, "none");
+      popupChartInstance.zoomScale("y", savedY, "none");
+    }
+
+    setLiveUpdateStatus(`마지막 갱신 ${new Date().toLocaleTimeString()}`);
+  } catch (err) {
+    setLiveUpdateStatus("갱신 오류: " + err.message);
+  }
+}
+
+function startLiveUpdate() {
+  pollQuote();
+  liveUpdateTimer = setInterval(pollQuote, LIVE_UPDATE_INTERVAL_MS);
+}
+
+function stopLiveUpdate() {
+  if (liveUpdateTimer) clearInterval(liveUpdateTimer);
+  liveUpdateTimer = null;
+  setLiveUpdateStatus("");
+}
+
+function toggleLiveUpdate() {
+  liveUpdateEnabled = !liveUpdateEnabled;
+  document.getElementById("liveUpdateBtn").classList.toggle("active", liveUpdateEnabled);
+  document.getElementById("popupLiveUpdateBtn").classList.toggle("active", liveUpdateEnabled);
+  if (liveUpdateEnabled) startLiveUpdate(); else stopLiveUpdate();
+}
+
+document.getElementById("liveUpdateBtn").addEventListener("click", toggleLiveUpdate);
+document.getElementById("popupLiveUpdateBtn").addEventListener("click", toggleLiveUpdate);
 
 function renderVcp(vcp) {
   const box = document.getElementById("vcpBox");
