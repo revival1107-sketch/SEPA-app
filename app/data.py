@@ -272,8 +272,13 @@ def _fetch_naver_finsum_tokens(code6: str):
 
 
 def fetch_kr_operating_income_quarters(code6: str, limit: int = 4):
-    """네이버 금융(종목분석>기업현황) Financial Summary 표의 분기별 실제 영업이익과
-    영업이익률을 가져온다(단위: 억원 -> 원 환산)."""
+    """네이버 금융(종목분석>기업현황) Financial Summary 표에서 현재 분기와 향후 분기의
+    컨센서스(예상) 영업이익/영업이익률을 가져온다(단위: 억원 -> 원 환산).
+
+    투자 판단에는 이미 지나간 실적보다 앞으로의 실적이 중요하므로 과거 발표된 분기는
+    제외하고, 아직 발표되지 않은(컨센서스 추정치, "(E)" 표시) 분기만 반환한다. 단
+    전년동기 대비 증감률 계산에는 과거 실제 분기 값을 사용한다.
+    """
     out = []
     try:
         encparam, id_ = _fetch_naver_finsum_tokens(code6)
@@ -300,9 +305,11 @@ def fetch_kr_operating_income_quarters(code6: str, limit: int = 4):
         if target is None:
             return out
         target = target.set_index(target.columns[0])
-        if "영업이익" not in target.index:
+        # "영업이익" 행은 아직 발표되지 않은 분기(컨센서스)에 대해 값이 비어 있고,
+        # "영업이익(발표기준)" 행만 향후 분기의 컨센서스 추정치까지 채워져 있다.
+        if "영업이익(발표기준)" not in target.index:
             return out
-        oi_row = target.loc["영업이익"]
+        oi_row = target.loc["영업이익(발표기준)"]
         margin_row = target.loc["영업이익률"] if "영업이익률" in target.index else None
 
         entries = []
@@ -327,13 +334,15 @@ def fetch_kr_operating_income_quarters(code6: str, limit: int = 4):
                     margin = float(mval)
             entries.append({"label": label, "value_eok": float(val), "is_estimate": is_estimate, "margin_pct": margin})
 
-        entries = [e for e in entries if not e["is_estimate"]]
-        entries.reverse()  # 표는 과거->현재 순이므로 최근 분기가 먼저 오도록 뒤집는다
-
-        for i, e in enumerate(entries[:limit]):
+        # entries는 표 순서 그대로(과거->현재->미래) 정렬되어 있다. 전년동기 대비 증감률은
+        # 같은 분기의 1년 전(4분기 전, 실제 발표치) 값과 비교해 계산한 뒤, 출력은 아직
+        # 발표되지 않은(컨센서스) 분기만 현재->미래 순으로 남긴다.
+        for i, e in enumerate(entries):
+            if not e["is_estimate"]:
+                continue
             yoy = None
-            if i + 4 < len(entries):
-                prev = entries[i + 4]["value_eok"]
+            if i - 4 >= 0:
+                prev = entries[i - 4]["value_eok"]
                 if prev and prev > 0:
                     yoy = round((e["value_eok"] / prev - 1) * 100, 1)
             out.append({
@@ -342,6 +351,7 @@ def fetch_kr_operating_income_quarters(code6: str, limit: int = 4):
                 "yoy_growth_pct": yoy,
                 "margin_pct": e["margin_pct"],
             })
+        out = out[:limit]
     except Exception:
         pass
     return out

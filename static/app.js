@@ -974,10 +974,11 @@ function renderRs(data) {
   html += `<p class="hint">※ EPS는 애널리스트 컨센서스 추정치이며, 무료 데이터 특성상 현재분기·+1분기까지만 제공되고 +2~+4분기는 데이터가 없어 "-"로 표시됩니다.</p>`;
 
   if (oiQuarters.length) {
-    html += `<h4 style="margin:14px 0 6px 0;color:var(--muted);font-size:13px;font-weight:600;">분기별 영업이익 (실제)</h4>`;
+    html += `<h4 style="margin:14px 0 6px 0;color:var(--muted);font-size:13px;font-weight:600;">분기별 영업이익 (컨센서스 전망)</h4>`;
     oiQuarters.forEach(q => {
       html += `<div class="stat-row"><span class="label">${q.label} 영업이익</span><span class="value">${formatOiValue(q, f.currency)}</span></div>`;
     });
+    html += `<p class="hint">※ 아직 발표되지 않은 현재·향후 분기의 증권사 컨센서스 추정치입니다(한국 종목, 네이버 금융 제공). 괄호 값은 전년 동기 실제 대비 증감률입니다.</p>`;
   }
   box.innerHTML = html;
 }
@@ -1022,7 +1023,7 @@ function renderScreenResult(data) {
   let html = `<div style="overflow-x:auto"><table class="screen-table"><thead><tr>
     <th>종목</th><th>현재가</th><th>시가총액</th><th>RS Rating</th>
     <th>현재분기 EPS</th><th>+1분기 EPS</th><th>+2분기 EPS</th><th>+3분기 EPS</th><th>+4분기 EPS</th>
-    <th>영업이익(1)</th><th>영업이익(2)</th><th>영업이익(3)</th><th>영업이익(4)</th>
+    <th>영업이익 전망(1)</th><th>영업이익 전망(2)</th><th>영업이익 전망(3)</th><th>영업이익 전망(4)</th>
   </tr></thead><tbody>`;
   rows.forEach(r => {
     const marketLabel = r.exchange_label || (r.market === "KR" ? "한국" : "미국");
@@ -1044,7 +1045,7 @@ function renderScreenResult(data) {
     </tr>`;
   });
   html += `</tbody></table></div>`;
-  html += `<p class="hint">※ EPS는 애널리스트 컨센서스 추정치이며(현재분기·+1분기까지만 데이터 존재, 이후는 "-"), 영업이익은 실제 보고된 분기 실적입니다. 괄호 값은 전년 동기 대비 증감률입니다.</p>`;
+  html += `<p class="hint">※ EPS는 애널리스트 컨센서스 추정치이며(현재분기·+1분기까지만 데이터 존재, 이후는 "-"), 영업이익 전망은 아직 발표되지 않은 현재·향후 분기의 증권사 컨센서스 추정치입니다(한국 종목만 제공). 괄호 값은 전년 동기 실제 대비 증감률입니다.</p>`;
   resultEl.innerHTML = html;
 
   resultEl.querySelectorAll("tr[data-ticker]").forEach(tr => {
