@@ -244,38 +244,88 @@ def fetch_eps_outlook(ticker: str):
     return out
 
 
+_NAVER_FINSUM_TOKEN_CACHE = {}  # code6 -> (timestamp, encparam, id)
+_NAVER_FINSUM_TOKEN_TTL = 60 * 60 * 6  # encparam/id는 종목코드에 종속되어 거의 바뀌지 않는다
+
+
+def _fetch_naver_finsum_tokens(code6: str):
+    """네이버 금융(WiseReport) Financial Summary AJAX 호출에 필요한 encparam/id 토큰을
+    기업현황 페이지의 임베디드 스크립트에서 추출한다(종목코드별로 고정값)."""
+    with _CACHE_LOCK:
+        cached = _NAVER_FINSUM_TOKEN_CACHE.get(code6)
+        if cached and time.time() - cached[0] < _NAVER_FINSUM_TOKEN_TTL:
+            return cached[1], cached[2]
+    r = requests.get(
+        f"https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code6}&target=finsum_more",
+        timeout=6, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.naver.com/"},
+    )
+    r.encoding = "utf-8"
+    text = r.text
+    m_enc = re.search(r"encparam:\s*'([^']+)'", text)
+    m_id = re.search(r"id:\s*'([^']+)'\s*\?", text)
+    if not m_enc or not m_id:
+        return None, None
+    encparam, id_ = m_enc.group(1), m_id.group(1)
+    with _CACHE_LOCK:
+        _NAVER_FINSUM_TOKEN_CACHE[code6] = (time.time(), encparam, id_)
+    return encparam, id_
+
+
 def fetch_kr_operating_income_quarters(code6: str, limit: int = 4):
-    """네이버 금융 종합정보 탭의 '기업실적분석' 표에서 분기별 실제 영업이익을 가져온다(단위: 억원 -> 원 환산)."""
+    """네이버 금융(종목분석>기업현황) Financial Summary 표의 분기별 실제 영업이익과
+    영업이익률을 가져온다(단위: 억원 -> 원 환산)."""
     out = []
     try:
-        r = requests.get(
-            f"https://finance.naver.com/item/main.naver?code={code6}",
-            timeout=6, headers={"User-Agent": "Mozilla/5.0"},
-        )
-        tables = pd.read_html(io.StringIO(r.text), match="주요재무정보")
-        df = tables[0]
-        label_col = df.columns[0]
-        matched = df[df[label_col] == "영업이익"]
-        if matched.empty:
+        encparam, id_ = _fetch_naver_finsum_tokens(code6)
+        if not encparam or not id_:
             return out
-        row = matched.iloc[0]
+        r = requests.get(
+            "https://navercomp.wisereport.co.kr/v2/company/ajax/cF1001.aspx",
+            params={"cmp_cd": code6, "fin_typ": 0, "freq_typ": "Q", "encparam": encparam, "id": id_},
+            timeout=6, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://navercomp.wisereport.co.kr/"},
+        )
+        r.encoding = "utf-8"
+        tables = pd.read_html(io.StringIO(r.text))
+        target = None
+        for t in tables:
+            if t.shape[1] < 2:
+                continue
+            try:
+                first_col = t.iloc[:, 0].astype(str)
+            except Exception:
+                continue
+            if (first_col == "영업이익").any():
+                target = t
+                break
+        if target is None:
+            return out
+        target = target.set_index(target.columns[0])
+        if "영업이익" not in target.index:
+            return out
+        oi_row = target.loc["영업이익"]
+        margin_row = target.loc["영업이익률"] if "영업이익률" in target.index else None
 
         entries = []
-        for col in df.columns:
-            if col[0] != "최근 분기 실적":
+        for col in target.columns:
+            if not isinstance(col, tuple) or "분기" not in str(col[0]):
                 continue
             period = str(col[1])
             is_estimate = "(E)" in period
-            period_clean = period.replace("(E)", "").strip()
-            val = row[col]
-            if pd.isna(val):
+            period_clean = period.split("(IFRS")[0].replace("(E)", "").strip()
+            val = oi_row.get(col)
+            if val is None or (isinstance(val, float) and val != val):
                 continue
             try:
-                year_s, month_s = period_clean.split(".")
+                year_s, month_s = period_clean.split("/")
                 label = _quarter_label(int(year_s), int(month_s))
             except Exception:
                 continue
-            entries.append({"label": label, "value_eok": float(val), "is_estimate": is_estimate})
+            margin = None
+            if margin_row is not None:
+                mval = margin_row.get(col)
+                if mval is not None and not (isinstance(mval, float) and mval != mval):
+                    margin = float(mval)
+            entries.append({"label": label, "value_eok": float(val), "is_estimate": is_estimate, "margin_pct": margin})
 
         entries = [e for e in entries if not e["is_estimate"]]
         entries.reverse()  # 표는 과거->현재 순이므로 최근 분기가 먼저 오도록 뒤집는다
@@ -290,6 +340,7 @@ def fetch_kr_operating_income_quarters(code6: str, limit: int = 4):
                 "label": e["label"],
                 "value": e["value_eok"] * 1e8,
                 "yoy_growth_pct": yoy,
+                "margin_pct": e["margin_pct"],
             })
     except Exception:
         pass

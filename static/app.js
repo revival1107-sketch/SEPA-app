@@ -559,8 +559,10 @@ function formatOiValue(q, currency) {
   const scaled = currency === "KRW" ? q.value / 1e8 : q.value / 1e6;
   const unit = currency === "KRW" ? "억" : "M";
   const text = `${scaled.toLocaleString(undefined, { maximumFractionDigits: 1 })}${unit}`;
-  if (q.yoy_growth_pct === null || q.yoy_growth_pct === undefined) return text;
-  return `${text} (${fmtPct(q.yoy_growth_pct)})`;
+  const withYoy = (q.yoy_growth_pct === null || q.yoy_growth_pct === undefined) ? text : `${text} (${fmtPct(q.yoy_growth_pct)})`;
+  // 영업이익률은 네이버(WiseReport) 소스가 있는 한국 종목에서만 채워진다.
+  if (q.margin_pct === null || q.margin_pct === undefined) return withYoy;
+  return `${withYoy}<br><span style="color:var(--muted);font-size:11px;">(영업이익률 ${q.margin_pct.toFixed(1)}%)</span>`;
 }
 
 function formatMarketCap(value, currency) {
